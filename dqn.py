@@ -20,7 +20,7 @@ class DQN(nn.Module):
         output = self.relu(self.linear1(x))
         output = self.relu(self.linear2(output))
 
-        # it outpus the Q value for actions
+        # it outpus the Q values for actions
         actions = self.linear3(output)
 
         return actions

@@ -61,7 +61,10 @@ class ReplayBuffer(object):
     def sample(self, batch_size):
         return random.sample(self.buffer, batch_size)
     
-    def __len(self):
+    def __len__(self):
         return len(self.buffer)
+
+    def show(self, idx):
+        return self.buffer[idx]
     
     
