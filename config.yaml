@@ -1,5 +1,5 @@
 maintainer: Dhanoop Karunakaran
-debug: True
+debug: False
 train:
   lr: 0.0001
   gamma: 0.99
@@ -7,13 +7,14 @@ train:
     - 0.9
     - 0.999
   random_seed: 543
-  n_epidode: 5000
-  n_timesteps: 10
+  n_epidode: 1000
   batch_size: 32
-  update_freq: 64 #every 4 iteration
-  target_update_freq: 1000 #every 10 iteration.
-  epsilon_start: 0.9
-  epsilon_end: 0.05
-  epsilon_decay: 1000
+  update_freq: 64 #every 4 step_dones
+  target_update_freq: 10 #every 10 episodes.
+  store_stats: 50 # every 50 episodes
+  epsilon: 0.99
+  stats:
+      loss: []
+      avg_loss: []
 replay_buffer_size: 10000
 

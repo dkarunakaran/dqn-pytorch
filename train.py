@@ -50,43 +50,46 @@ class Train:
         self.target = DQN(self.env.observation_space.shape[0], self.env.action_space.n)
         self.target.load_state_dict(self.prediction.state_dict())
         self.replay_buffer = ReplayBuffer(capacity=self.cfg['replay_buffer_size'])
-        self.epsilon_start = self.cfg['train']['epsilon_start']
-        self.epsilon_end = self.cfg['train']['epsilon_end']
-        self.epsilon_decay = self.cfg['train']['epsilon_decay']
         self.steps_done = 1
     
-    def select_action(self, state):
-        sample = random.random()
-        eps_threshold = self.epsilon_end + (self.epsilon_start - self.epsilon_end) * math.exp(-1. * self.steps_done / self.epsilon_decay) 
-        if sample > eps_threshold:
+    def select_action(self, state, epsilon):
+        if torch.rand(1) < epsilon:
+            self.logger.debug("Action selected from the prediction network")
             with torch.no_grad():
                return torch.argmax(self.prediction(state))
         else:
+            self.logger.debug(f"Action selected randomly, epsilon: {epsilon}")
             return torch.tensor(self.env.action_space.sample())
 
     def run(self):
         self.logger.info("Training started")
 
         torch.manual_seed(self.cfg['train']['random_seed'])
-        optim_fn = optim.Adam(self.prediction.parameters(), lr=self.cfg['train']['lr'], betas=self.cfg['train']['betas'])
+        optim_fn = optim.Adam(self.prediction.parameters(), lr=self.cfg['train']['lr'])
 
+        epsilon = self.cfg['train']['epsilon']
+        stats = self.cfg['train']['stats']
         # loop through the episode
         for episode in range(self.cfg['train']['n_epidode']):
-            self.logger.info(f"--------Episode: {episode} started--------step done:{self.steps_done}")
+            self.logger.debug(f"--------Episode: {episode} started--------step done:{self.steps_done}")
             state = self.env.reset()
             # Converted to tensor
             state = torch.FloatTensor(state[0])
             done = False
             optim_fn.zero_grad()
             count = 1
+            truncated, terminated = False, False # initiate the terminated and truncated flags
+            self.prediction.train()
+            self.target.train()
             # loop through timespteps
-            while not done:
+            while not truncated and not terminated:
                 # Sample the action
-                action = self.select_action(state)
-                next_state, reward, done, _, _= self.env.step(action.item())
+                action = self.select_action(state, epsilon)
+                next_state, reward, truncated, terminated, _= self.env.step(action.item())
+
                 next_state = torch.FloatTensor(next_state)
                 # Collect the expereince in replay_buffer
-                self.replay_buffer.push(state, action, next_state, reward)
+                self.replay_buffer.push([state, action, reward, truncated,terminated, next_state])
 
                 # Assign next state as current state
                 state = next_state
@@ -98,36 +101,55 @@ class Train:
                     # then we select the the Q values for the action taken
                     replay_data = self.replay_buffer.sample(self.cfg['train']['batch_size'])
                     #print(replay_data)
-                    for state, action, next_state, reward in replay_data:
+                    for state_b, action_b, reward_b, truncated_b, terminated_b, next_state_b in replay_data:
                         # Get the Q values for current observations (Q(s_t,a)) from prediction network
-                        q_values_st = self.prediction(state)
+                        q_values_st = self.prediction(state_b)
                         # We got the Q values for all the action for the given state 
                         # and now getting the q_value for slected action
-                        q_s_a = torch.gather(q_values_st, 0, action) 
+                        q_s_a = torch.gather(q_values_st, 0, action_b) 
                         #max(Q(s_t_1, a)) - from target network
-                        q_values_st_1 = torch.max(self.target(next_state))
+                        q_values_st_1 = torch.max(self.target(next_state_b), dim=-1, keepdim=True)[0]
                         # actual_return - r+gamma*max(Q(s_t_1, a))
-                        actural_return = reward+(self.cfg['train']['gamma']+q_values_st_1)
+                        actural_return = reward_b+(~(truncated_b + terminated_b) * self.cfg['train']['gamma']+q_values_st_1)
                         #actural_return.requires_grad = True
                         # Huber loss, which is less sensitive to outliers in data than squared-error loss. In value based RL ssetup, huber loss is preferred.
                         # Smooth L1 loss is closely related to HuberLoss
+                        self.prediction.zero_grad()
                         loss =  F.smooth_l1_loss(q_s_a, actural_return)
+                        stats['loss'].append(loss.item())
                         loss.backward()
                         optim_fn.step()
 
-                    self.logger.info(f"Updated the prediction network at {self.steps_done}")
-                
-                # Update target network
-                if self.steps_done%self.cfg['train']['target_update_freq'] == 0:
-                    self.target.load_state_dict(self.prediction.state_dict())
-                    self.logger.info(f"Updated the target network at {self.steps_done}")
+                    self.logger.debug(f"Updated the prediction network at {episode} episode")
 
                 # Enviornment return done == true if the current episode is terminated
-                if done:
-                    self.logger.info('Iteration: {}, Score: {}'.format(episode, count))
-                    break
+                if truncated or terminated:
+                    self.logger.info('Episode: {}, Score: {}'.format(episode, count))
                 count += 1
                 self.steps_done += 1   
+
+            epsilon = max(0, epsilon - 1/10000)
+
+            # Update target network
+            if episode%self.cfg['train']['target_update_freq'] == 0:
+                self.target.load_state_dict(self.prediction.state_dict())
+                self.logger.info(f"Updated the target network at {episode} episode")
+
+            # Storing average losses for plotting
+            if episode%self.cfg['train']['store_stats'] == 0:
+                stats['avg_loss'].append(np.mean(stats['loss']))
+                stats['loss'] = []
+
+        torch.save(self.prediction, 'model/prediction.pkl')
+        torch.save(self.target, 'model/target.pkl')
+
+        plt.figure(figsize=(10,6))
+        plt.xlabel("X-axis")  # add X-axis label
+        plt.ylabel("Y-axis")  # add Y-axis label
+        plt.title("Loss")  # add title
+        plt.plot(stats['avg_loss'])
+        plt.savefig('loss.png')
+        plt.close()
 
 if __name__ == '__main__':
     train = Train()

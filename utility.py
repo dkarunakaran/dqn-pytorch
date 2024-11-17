@@ -53,13 +53,18 @@ def logger_helper():
 
 class ReplayBuffer(object):
     def __init__(self, capacity=None):
+        self.capacity = capacity
         self.buffer = deque([], capacity)        
 
-    def push(self, state, action, next_state, reward):
-        self.buffer.append((state, action, next_state, reward))
+    def push(self, transition):
+        
+        self.buffer.append(transition)
     
     def sample(self, batch_size):
         return random.sample(self.buffer, batch_size)
+    
+    def can_sample(self, batch_size):
+        return len(self.buffer) >= batch_size * 10
     
     def __len__(self):
         return len(self.buffer)
