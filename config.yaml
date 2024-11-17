@@ -7,7 +7,7 @@ train:
     - 0.9
     - 0.999
   random_seed: 543
-  n_epidode: 1000
+  n_epidode: 1200
   batch_size: 32
   update_freq: 64 #every 4 step_dones
   target_update_freq: 10 #every 10 episodes.
